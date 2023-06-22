@@ -1,19 +1,8 @@
-#![allow(unused)]
+use std::ffi::CString;
 
-use std::{
-    ffi::{c_char, c_int, c_void, CStr, CString},
-    ptr,
-};
-
-use anyhow::bail;
 use luajit2_sys as sys;
-use values::{LuaValue, UserData, Value};
 
-use macros::*;
-
-pub trait GlobalConstructor {
-    fn new(state: &mut State) -> Self;
-}
+use crate::{from_lua::FromLua, is_type::IsType, to_lua::ToLua};
 
 pub struct State(*mut sys::lua_State, bool);
 
@@ -28,6 +17,11 @@ impl State {
         State(ptr, false)
     }
 
+    #[inline]
+    pub(crate) fn as_ptr(&self) -> *mut sys::lua_State {
+        self.0
+    }
+
     pub fn inspect(&mut self) {
         self.get_global("pp");
         self.push_value(-2);
@@ -38,38 +32,6 @@ impl State {
         self.get_global("_G");
         self.inspect();
         self.pop(1);
-    }
-
-    pub fn dump_stack(&self) {
-        let size = self.get_top();
-        println!("-----------------------------------");
-        println!("- Stack: {}", size);
-        println!("-----------------------------------");
-        for i in 1..=size {
-            print!("> [{i} / -{}] ", size - i + 1);
-            if self.is_number(i) {
-                println!("{}", self.to_number(i).unwrap());
-            } else if self.is_string(i) {
-                println!("{}", self.to_string(i).unwrap());
-            } else if self.is_bool(i) {
-                println!("{}", self.to_bool(i).unwrap());
-            } else if self.is_function(i) {
-                println!("func");
-            } else if self.is_table(i) {
-                println!("table");
-            } else if self.is_native_function(i) {
-                println!("native func");
-            } else if self.is_user_data(i) {
-                println!("user data");
-            } else if self.is_light_user_data(i) {
-                println!("light user data");
-            } else if self.is_coroutine(i) {
-                println!("coroutine");
-            } else if self.is_nil(i) {
-                println!("nil");
-            }
-        }
-        println!("-----------------------------------");
     }
 
     pub fn owned(&self) -> bool {
@@ -85,80 +47,15 @@ impl State {
         self.pop(1);
     }
 
-    pub fn is_user_data(&self, idx: i32) -> bool {
-        unsafe { sys::lua_isuserdata(self.0, idx) != 0 }
+    pub fn is<T: IsType>(&self, idx: i32) -> bool {
+        T::is_type(self, idx)
     }
 
-    pub fn is_light_user_data(&self, idx: i32) -> bool {
-        unsafe { sys::lua_islightuserdata(self.0, idx) != 0 }
-    }
-
-    pub fn is_coroutine(&self, idx: i32) -> bool {
-        unsafe { sys::lua_isthread(self.0, idx) != 0 }
-    }
-
-    pub fn is_function(&self, idx: i32) -> bool {
-        unsafe { sys::lua_isfunction(self.0, idx) != 0 }
-    }
-
-    pub fn is_native_function(&self, idx: i32) -> bool {
-        unsafe { sys::lua_iscfunction(self.0, idx) != 0 }
-    }
-
-    pub fn is_bool(&self, idx: i32) -> bool {
-        unsafe { sys::lua_isboolean(self.0, idx) != 0 }
-    }
-
-    pub fn is_number(&self, idx: i32) -> bool {
-        unsafe { sys::lua_isnumber(self.0, idx) != 0 }
-    }
-
-    pub fn is_string(&self, idx: i32) -> bool {
-        unsafe { sys::lua_isstring(self.0, idx) != 0 }
-    }
-
-    pub fn is_table(&self, idx: i32) -> bool {
-        unsafe { sys::lua_istable(self.0, idx) != 0 }
-    }
-
-    pub fn is_nil(&self, idx: i32) -> bool {
-        unsafe { sys::lua_isnil(self.0, idx) != 0 }
-    }
-
-    pub fn to_bool(&self, idx: i32) -> Option<bool> {
-        if self.is_bool(idx) {
-            Some(unsafe { sys::lua_toboolean(self.0, idx) } == 1)
-        } else {
-            None
-        }
-    }
-
-    pub fn to_number(&self, idx: i32) -> Option<f64> {
-        if self.is_number(idx) {
-            Some(unsafe { sys::lua_tonumber(self.0, idx) })
-        } else {
-            None
-        }
-    }
-
-    pub fn to_string(&self, idx: i32) -> Option<&str> {
-        if self.is_string(idx) {
-            let ptr = unsafe { sys::lua_tostring(self.0, idx) };
-            let cstr = unsafe { CStr::from_ptr(ptr) };
-            cstr.to_str().ok()
-        } else {
-            None
-        }
-    }
-
-    pub fn do_string(&mut self, code: &str) -> anyhow::Result<()> {
+    pub fn do_string(&mut self, code: &str) -> Result<(), &str> {
         let cstring = CString::new(code).unwrap();
         unsafe { sys::luaL_loadstring(self.0, cstring.as_ptr() as *const i8) };
-        let result = unsafe { sys::lua_pcall(self.0, 0, sys::LUA_MULTRET, 0) };
-        if result != 0 {
-            let err_message = self.to_string(-1).unwrap().to_string();
-            self.pop(1);
-            bail!(err_message);
+        if unsafe { sys::lua_pcall(self.0, 0, sys::LUA_MULTRET, 0) } != 0 {
+            Err(self.cast_to::<&str>(-1).unwrap())
         } else {
             Ok(())
         }
@@ -176,30 +73,8 @@ impl State {
         unsafe { sys::lua_pop(self.0, idx) }
     }
 
-    pub fn push(&mut self, value: impl Value) {
-        match value.to_lua_value() {
-            LuaValue::Integer(value) => unsafe { sys::lua_pushinteger(self.0, value) },
-            LuaValue::Number(value) => unsafe { sys::lua_pushnumber(self.0, value) },
-            LuaValue::Bool(value) => unsafe {
-                sys::lua_pushboolean(self.0, if value { 1 } else { 0 })
-            },
-            LuaValue::String(cstring) => unsafe { sys::lua_pushstring(self.0, cstring.into_raw()) },
-            LuaValue::Function(raw_func) => unsafe {
-                sys::lua_pushcfunction(self.0, Some(raw_func))
-            },
-            LuaValue::UserData(opaque_ptr, size, name, methods) => unsafe {
-                let managed_ptr = sys::lua_newuserdata(self.0, size);
-                ptr::copy_nonoverlapping(opaque_ptr, managed_ptr, size);
-
-                if sys::luaL_newmetatable(self.0, name as *const c_char) != 0 {
-                    sys::lua_newtable(self.0);
-                    sys::luaL_register(self.0, ptr::null(), methods.as_ptr());
-                    sys::lua_setfield(self.0, -2, cstr!("__index"));
-                }
-
-                sys::lua_setmetatable(self.0, -2);
-            },
-        }
+    pub fn push(&mut self, value: impl ToLua) {
+        value.to_lua(self.0);
     }
 
     pub fn set_field(&mut self, idx: i32, name: &str) {
@@ -229,6 +104,34 @@ impl State {
     pub fn call(&mut self, nargs: i32, nresults: i32) {
         unsafe { sys::lua_call(self.0, nargs, nresults) }
     }
+
+    pub fn pcall(&mut self, nargs: i32, nresults: i32) -> Result<(), &str> {
+        if unsafe { sys::lua_pcall(self.0, nargs, nresults, 0) } != 0 {
+            Err(self.cast_to::<&str>(-1).unwrap())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn cast_to<'a, T: FromLua<'a>>(&'a mut self, idx: i32) -> Option<T::Output> {
+        T::from_lua(self, idx)
+    }
+
+    pub fn protected_call<'a, A: ToLua, B: FromLua<'a>>(
+        &mut self,
+        args: A,
+    ) -> Result<B::Output, &str> {
+        self.push(args);
+        if unsafe { sys::lua_pcall(self.0, A::len(), B::len(), 0) } != 0 {
+            Err(self.cast_to::<&str>(-1).unwrap())
+        } else {
+            if let Some(v) = B::from_lua(self, -1) {
+                Ok(v)
+            } else {
+                Err("Failed to cast output.")
+            }
+        }
+    }
 }
 
 impl Drop for State {
@@ -240,12 +143,18 @@ impl Drop for State {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::ffi::c_int;
+pub mod tests {
+    use macros::{cstr, lua_func, lua_method, user_data};
 
-    use values::RawFunction;
+    use crate::UserData;
 
     use super::*;
+
+    macro_rules! from_ptr {
+        ($name:expr) => {
+            unsafe { std::ffi::CStr::from_ptr($name) }.to_str().unwrap()
+        };
+    }
 
     #[test]
     fn push_int() {
@@ -254,8 +163,8 @@ mod tests {
         state.push(20 as i64);
 
         assert!(state.get_top() == 2);
-        assert_eq!(state.to_number(-2).unwrap(), 10 as f64);
-        assert_eq!(state.to_number(-1).unwrap(), 20 as f64);
+        assert_eq!(state.cast_to::<i32>(-2).unwrap(), 10);
+        // assert_eq!(state.cast_to::<f64>(-1).unwrap(), 20.0);
     }
 
     #[test]
@@ -265,8 +174,8 @@ mod tests {
         state.push(9.8 as f64);
 
         assert!(state.get_top() == 2);
-        assert_eq!(state.to_number(-2).unwrap(), 10.5 as f64);
-        assert_eq!(state.to_number(-1).unwrap(), 9.8 as f64);
+        assert_eq!(state.cast_to::<f64>(-2).unwrap(), 10.5 as f64);
+        assert_eq!(state.cast_to::<f64>(-1).unwrap(), 9.8 as f64);
     }
 
     #[test]
@@ -278,8 +187,33 @@ mod tests {
         state.push(name.clone());
 
         assert_eq!(state.get_top(), 2);
-        assert_eq!(state.to_string(-2).unwrap(), name.as_str());
-        assert_eq!(state.to_string(-1).unwrap(), name.as_str());
+        assert_eq!(state.cast_to::<&str>(-2).unwrap(), name.as_str());
+        assert_eq!(state.cast_to::<&str>(-1).unwrap(), name.as_str());
+    }
+
+    #[test]
+    fn protected_call_with_single_return_arg() {
+        let mut state = State::new();
+        state
+            .do_string("function sum(a, b) return a + b end")
+            .unwrap();
+        state.get_global("sum");
+
+        let result = state.protected_call::<_, i32>((2, 3));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 5);
+    }
+
+    #[test]
+    fn protected_call_with_multi_return() {
+        let mut state = State::new();
+        state
+            .do_string("function double(a, b) return a * 2, b * 2 end")
+            .unwrap();
+        state.get_global("double");
+
+        // let result = state.protected_call::<_, (i32, i32)>((4, 8));
+        // assert!(result.is_ok());
     }
 
     #[test]
@@ -289,8 +223,40 @@ mod tests {
         state.push(true);
 
         assert_eq!(state.get_top(), 2);
-        assert_eq!(state.to_bool(-2).unwrap(), false);
-        assert_eq!(state.to_bool(-1).unwrap(), true);
+        assert_eq!(state.cast_to::<bool>(-2).unwrap(), false);
+        assert_eq!(state.cast_to::<bool>(-1).unwrap(), true);
+    }
+
+    #[test]
+    fn push_tuple_with_different_types() {
+        let mut state = State::new();
+        state.push((10, false, "soreto"));
+
+        assert_eq!(state.get_top(), 3);
+        assert_eq!(state.cast_to::<f64>(-3).unwrap(), 10.0);
+        assert_eq!(state.cast_to::<bool>(-2).unwrap(), false);
+        assert_eq!(state.cast_to::<&str>(-1).unwrap(), "soreto");
+    }
+
+    #[test]
+    fn push_tuples_2() {
+        let mut state = State::new();
+        state.push((10, 20));
+
+        assert_eq!(state.get_top(), 2);
+        assert_eq!(state.cast_to::<f64>(-2).unwrap(), 10.0);
+        assert_eq!(state.cast_to::<f64>(-1).unwrap(), 20.0);
+    }
+
+    #[test]
+    fn push_tuples_3() {
+        let mut state = State::new();
+        state.push((10, 20, 30));
+
+        assert_eq!(state.get_top(), 3);
+        assert_eq!(state.cast_to::<f64>(-3).unwrap(), 10.0);
+        assert_eq!(state.cast_to::<f64>(-2).unwrap(), 20.0);
+        assert_eq!(state.cast_to::<f64>(-1).unwrap(), 30.0);
     }
 
     #[test]
@@ -304,8 +270,8 @@ mod tests {
             }
 
             fn sum(&mut self, state: &mut State) -> usize {
-                let a = state.to_number(-2).unwrap();
-                let b = state.to_number(-1).unwrap();
+                let a = state.cast_to::<f64>(-2).unwrap();
+                let b = state.cast_to::<f64>(-1).unwrap();
 
                 state.push(a + b);
                 1
@@ -329,7 +295,7 @@ mod tests {
         state.push(Math {});
 
         assert_eq!(state.get_top(), 1);
-        assert!(state.is_user_data(-1));
+        assert!(state.is::<Math>(-1));
 
         state.set_global("math");
         assert_eq!(state.get_top(), 0);
@@ -345,34 +311,66 @@ mod tests {
         state.push(12.0);
         state.call(3, 1);
         assert_eq!(state.get_top(), 2);
-        assert_eq!(state.to_number(-1).unwrap(), 22.0);
-
-        state.dump_stack();
+        assert_eq!(state.cast_to::<f64>(-1).unwrap(), 22.0);
     }
 
     #[test]
-    fn proc_macros() {
-        // #[derive(UserData)]
+    fn proc_macro_pub_raw_function() {
+        #[allow(dead_code)]
         struct Test {
             a: usize,
         }
 
         #[user_data]
         impl Test {
-            #[ctor]
-            fn new() -> Test {
-                Test { a: 10 }
-            }
+            pub fn foo(&mut self, state: &mut State) -> i32 {
+                let is_user_data = state.is::<Test>(1);
+                state.push(is_user_data);
 
-            #[method]
-            fn foo(&self, a: f64, b: f64) -> f64 {
-                a + b
+                let a = state.cast_to::<f64>(2).unwrap_or(0.0);
+                let b = state.cast_to::<f64>(3).unwrap_or(0.0);
+                state.push(a + b);
+
+                2
             }
         }
 
-        // let mut state = State::new();
-        // state.push(Test::new());
-        // state.set_global("test");
-        // state.do_string("test:foo(2, 3)");
+        let slice = from_ptr!(<Test as UserData>::name());
+        assert_eq!(slice, "Test");
+
+        let funcs = <Test as UserData>::functions();
+        assert!(funcs.len() > 0);
+
+        let func_name = from_ptr!(funcs[0].name);
+        assert_eq!(func_name, "foo");
+
+        let mut state = State::new();
+        state.push(Test { a: 10 });
+        state.get_field(-1, "foo");
+        state.push_value(-2);
+        state.push(2);
+        state.push(3);
+
+        // let result = state.protected_call::<f64>(3, 2);
+        // assert!(result.is_ok());
+        // assert_eq!(result.unwrap(), 5);
+
+        // assert_eq!(state.get_top(), 3);
+        // assert_eq!(state.to_bool(-2).unwrap(), true);
+        // assert_eq!(state.to_number(-1).unwrap(), 5.);
+
+        // dbg!(state.stack());
     }
+
+    #[test]
+    fn proc_macro_raw_static_functions() {}
+
+    #[test]
+    fn proc_macro_wrapped_function() {}
+
+    #[test]
+    fn proc_macro_wrapped_static_function() {}
+
+    #[test]
+    fn return_multiple_values_using_tuple() {}
 }

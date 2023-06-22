@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-user_data_derive = { path = "../user_data_derive" }
+proc = { path = "proc" }
