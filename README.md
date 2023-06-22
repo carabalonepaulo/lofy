@@ -4,7 +4,7 @@ High level LuaJIT wrapper for Rust. Compile time magic to bridge Lua <-> Rust in
 ## API changes
 - `lua_to*` -> `state.cast_to::<T>(idx)`
 - `lua_is*` -> `state.is::<T>(idx)`
-- `lua_pcall` -> `state.protected_call::<T: ToLua, B: FromLua>(args: A)
+- `lua_pcall` -> `state.protected_call::<T: ToLua, B: FromLua>(args: A)`
 
 ## Working with multiple values
 Tuples implement `ToLua` and `FromLua`. So you can use it to represent multiple values in lua.
