@@ -14,8 +14,6 @@ pub trait ToLua {
     }
 }
 
-generate_to_lua_tuple_impl!(25);
-
 impl ToLua for i32 {
     #[inline]
     fn to_lua(self, state: *mut luajit2_sys::lua_State) {
@@ -99,3 +97,5 @@ impl<T: UserData> ToLua for T {
         }
     }
 }
+
+generate_to_lua_tuple_impl!(25);

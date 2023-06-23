@@ -2,6 +2,7 @@ use std::ffi::CStr;
 
 use crate::{state::State, UserData};
 use luajit2_sys as sys;
+use macros::generate_from_lua_tuple_impl;
 
 pub trait FromLua<'a> {
     type Output;
@@ -100,3 +101,5 @@ impl<'a, T: UserData + 'a> FromLua<'a> for T {
         todo!()
     }
 }
+
+generate_from_lua_tuple_impl!();

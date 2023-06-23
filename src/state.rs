@@ -6,6 +6,12 @@ use crate::{from_lua::FromLua, is_type::IsType, to_lua::ToLua};
 
 pub struct State(*mut sys::lua_State, bool);
 
+impl Clone for State {
+    fn clone(&self) -> Self {
+        Self::from_raw(self.0)
+    }
+}
+
 impl State {
     const PP: &str = include_str!("./pp.lua");
 
@@ -113,7 +119,7 @@ impl State {
         }
     }
 
-    pub fn cast_to<'a, T: FromLua<'a>>(&'a mut self, idx: i32) -> Option<T::Output> {
+    pub fn cast_to<'a, T: FromLua<'a>>(&mut self, idx: i32) -> Option<T::Output> {
         T::from_lua(self, idx)
     }
 
@@ -257,6 +263,28 @@ pub mod tests {
         assert_eq!(state.cast_to::<f64>(-3).unwrap(), 10.0);
         assert_eq!(state.cast_to::<f64>(-2).unwrap(), 20.0);
         assert_eq!(state.cast_to::<f64>(-1).unwrap(), 30.0);
+    }
+
+    #[test]
+    fn tuple_from_lua() {
+        let value = (10, 20, 30);
+        let mut state = State::new();
+        state.push(value);
+
+        let result = state.cast_to::<(i32, i32, i32)>(1);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), value);
+    }
+
+    #[test]
+    fn mixed_tuple_from_lua() {
+        let value = (10, false, "soreto");
+        let mut state = State::new();
+        state.push(value);
+
+        let result = state.cast_to::<(i32, bool, &str)>(1);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), value);
     }
 
     #[test]
