@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 mod from_lua;
 mod is_type;
 pub mod state;
@@ -9,9 +11,21 @@ pub struct NativeFunction;
 
 pub struct LuaFunction;
 
+pub struct AnyUserData;
+
 pub struct LightUserData;
 
 pub struct Coroutine;
+
+pub struct Table;
+
+pub struct RelativeValue<T>(i32, PhantomData<T>);
+
+impl<T> RelativeValue<T> {
+    pub fn new(idx: i32) -> Self {
+        Self(idx, PhantomData::<T>)
+    }
+}
 
 pub trait UserData {
     fn name() -> *const i8;

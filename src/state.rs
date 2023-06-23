@@ -2,7 +2,10 @@ use std::ffi::CString;
 
 use luajit2_sys as sys;
 
-use crate::{from_lua::FromLua, is_type::IsType, to_lua::ToLua};
+use crate::{
+    from_lua::FromLua, is_type::IsType, to_lua::ToLua, AnyUserData, Coroutine, LightUserData,
+    LuaFunction, NativeFunction, Table,
+};
 
 pub struct State(*mut sys::lua_State, bool);
 
@@ -23,9 +26,36 @@ impl State {
         State(ptr, false)
     }
 
-    #[inline]
-    pub(crate) fn as_ptr(&self) -> *mut sys::lua_State {
-        self.0
+    pub fn dump_stack(&self) {
+        let size = self.get_top();
+        println!("-----------------------------------");
+        println!("- Stack: {}", size);
+        println!("-----------------------------------");
+        for i in 1..=size {
+            print!("> [{i} / -{}] ", size - i + 1);
+            if self.is::<f64>(i) {
+                println!("{}", self.cast_to::<f64>(i).unwrap());
+            } else if self.is::<&str>(i) {
+                println!("{}", self.cast_to::<&str>(i).unwrap());
+            } else if self.is::<bool>(i) {
+                println!("{}", self.cast_to::<bool>(i).unwrap());
+            } else if self.is::<LuaFunction>(i) {
+                println!("func");
+            } else if self.is::<Table>(i) {
+                println!("table");
+            } else if self.is::<NativeFunction>(i) {
+                println!("native func");
+            } else if self.is::<AnyUserData>(i) {
+                println!("user data");
+            } else if self.is::<LightUserData>(i) {
+                println!("light user data");
+            } else if self.is::<Coroutine>(i) {
+                println!("coroutine");
+            } else if self.is::<()>(i) {
+                println!("nil");
+            }
+        }
+        println!("-----------------------------------");
     }
 
     pub fn inspect(&mut self) {
@@ -54,7 +84,7 @@ impl State {
     }
 
     pub fn is<T: IsType>(&self, idx: i32) -> bool {
-        T::is_type(self, idx)
+        T::is_type(self.0, idx)
     }
 
     pub fn do_string(&mut self, code: &str) -> Result<(), &str> {
@@ -119,8 +149,8 @@ impl State {
         }
     }
 
-    pub fn cast_to<'a, T: FromLua<'a>>(&mut self, idx: i32) -> Option<T::Output> {
-        T::from_lua(self, idx)
+    pub fn cast_to<'a, T: FromLua<'a>>(&self, idx: i32) -> Option<T::Output> {
+        T::from_lua(self.0, idx)
     }
 
     pub fn protected_call<'a, A: ToLua, B: FromLua<'a>>(
@@ -131,7 +161,7 @@ impl State {
         if unsafe { sys::lua_pcall(self.0, A::len(), B::len(), 0) } != 0 {
             Err(self.cast_to::<&str>(-1).unwrap())
         } else {
-            if let Some(v) = B::from_lua(self, -1) {
+            if let Some(v) = B::from_lua(self.0, -1) {
                 Ok(v)
             } else {
                 Err("Failed to cast output.")
@@ -152,7 +182,7 @@ impl Drop for State {
 pub mod tests {
     use macros::{cstr, lua_func, lua_method, user_data};
 
-    use crate::UserData;
+    use crate::{RelativeValue, UserData};
 
     use super::*;
 
@@ -288,6 +318,22 @@ pub mod tests {
     }
 
     #[test]
+    fn take_user_data_ref_from_stack() {
+        struct Test;
+
+        #[user_data]
+        impl Test {
+            pub fn foo(&mut self, state: &mut State) -> i32 {
+                state.push(10);
+                1
+            }
+        }
+
+        let mut state = State::new();
+        state.push(Test {});
+    }
+
+    #[test]
     fn push_user_data() {
         struct Math;
 
@@ -375,9 +421,15 @@ pub mod tests {
         let mut state = State::new();
         state.push(Test { a: 10 });
         state.get_field(-1, "foo");
-        state.push_value(-2);
-        state.push(2);
-        state.push(3);
+
+        let relative_value = RelativeValue::<Test>::new(-2);
+        let result = state.protected_call::<_, (bool, f32)>((relative_value, 2, 3));
+        if result.is_err() {
+            let msg = result.err().unwrap();
+            println!("{}", msg);
+        }
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (true, 5.0));
 
         // let result = state.protected_call::<f64>(3, 2);
         // assert!(result.is_ok());

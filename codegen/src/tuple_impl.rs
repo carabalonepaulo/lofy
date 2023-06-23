@@ -97,6 +97,7 @@ pub fn generate_from_lua_tuple_impl(_: TokenStream) -> TokenStream {
         let mut letters_a = vec![];
         let mut where_ch = vec![];
         let mut cast_impl = vec![];
+        let len = proc_macro2::Literal::i32_unsuffixed(n as i32);
 
         (0..n).for_each(|i| {
             let letter = alphabet[i];
@@ -117,8 +118,8 @@ pub fn generate_from_lua_tuple_impl(_: TokenStream) -> TokenStream {
             {
                 type Output = (#(#letters_c,)*);
 
-                fn from_lua(state: &State, idx: i32) -> Option<Self::Output> {
-                    let mut state = state.clone();
+                fn from_lua(ptr: *mut luajit2_sys::lua_State, idx: i32) -> Option<Self::Output> {
+                    let mut state = State::from_raw(ptr);
                     let mut idx = {
                         if idx.is_negative() {
                             state.get_top() + idx + 1
@@ -135,6 +136,8 @@ pub fn generate_from_lua_tuple_impl(_: TokenStream) -> TokenStream {
 
                     #return_value
                 }
+
+                fn len() -> i32 { #len }
             }
         });
     });
@@ -186,8 +189,8 @@ pub fn generate_to_lua_tuple_impl(_attr: TokenStream) -> TokenStream {
             where
                 #(#where_ch,)*
             {
-                fn to_lua(self, state: *mut sys::lua_State) {
-                    let mut state = State::from_raw(state);
+                fn to_lua(self, ptr: *mut luajit2_sys::lua_State) {
+                    let mut state = State::from_raw(ptr);
                     #(#state_push)*
                 }
 
