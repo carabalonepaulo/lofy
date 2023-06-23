@@ -356,10 +356,7 @@ pub mod tests {
 
     #[test]
     fn proc_macro_pub_raw_function() {
-        #[allow(dead_code)]
-        struct Test {
-            a: usize,
-        }
+        struct Test {}
 
         #[user_data]
         impl Test {
@@ -385,7 +382,7 @@ pub mod tests {
         assert_eq!(func_name, "foo");
 
         let state = State::new();
-        state.push(Test { a: 10 });
+        state.push(Test {});
         state.get_field(-1, "foo");
 
         let result = state.protected_call::<_, (bool, f32)>((ref_to!(Test, -2), 2, 3));
