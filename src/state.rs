@@ -167,7 +167,7 @@ pub mod tests {
 
         assert!(state.get_top() == 2);
         assert_eq!(state.cast_to::<i32>(-2).unwrap(), 10);
-        // assert_eq!(state.cast_to::<f64>(-1).unwrap(), 20.0);
+        assert_eq!(state.cast_to::<f64>(-1).unwrap(), 20.0);
     }
 
     #[test]
@@ -215,8 +215,8 @@ pub mod tests {
             .unwrap();
         state.get_global("double");
 
-        // let result = state.protected_call::<_, (i32, i32)>((4, 8));
-        // assert!(result.is_ok());
+        let result = state.protected_call::<_, (i32, i32)>((4, 8));
+        assert!(result.is_ok());
     }
 
     #[test]
