@@ -1,6 +1,13 @@
 pub use proc::*;
 
 #[macro_export]
+macro_rules! ref_to {
+    ($ty:ty, $idx:literal) => {
+        crate::RelativeValue::<$ty>::new($idx)
+    };
+}
+
+#[macro_export]
 macro_rules! cstr {
     ($s:expr) => {
         concat!($s, "\x00").as_ptr() as *const i8

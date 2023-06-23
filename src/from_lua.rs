@@ -106,18 +106,43 @@ impl<'a> FromLua<'a> for String {
     }
 }
 
-impl<'a, T: UserData + 'a> FromLua<'a> for T {
+impl<'a, T: UserData + 'a> FromLua<'a> for &'a T {
     type Output = &'a T;
 
     fn from_lua(ptr: *mut sys::lua_State, idx: i32) -> Option<Self::Output> {
         if unsafe { sys::lua_isuserdata(ptr, idx) != 0 } {
-            let ptr = unsafe { sys::lua_touserdata(ptr, idx) };
-            let aligned = ptr.cast() as *mut T;
-            unsafe { aligned.as_ref() }
+            let ud_ptr = unsafe { sys::lua_touserdata(ptr, idx) };
+            unsafe { (ud_ptr as *const T).as_ref() }
         } else {
             None
         }
     }
 }
+
+impl<'a, T: UserData + 'a> FromLua<'a> for &'a mut T {
+    type Output = &'a mut T;
+
+    fn from_lua(ptr: *mut sys::lua_State, idx: i32) -> Option<Self::Output> {
+        if unsafe { sys::lua_isuserdata(ptr, idx) != 0 } {
+            let ud_ptr = unsafe { sys::lua_touserdata(ptr, idx) };
+            unsafe { (ud_ptr as *mut T).as_mut() }
+        } else {
+            None
+        }
+    }
+}
+// impl<'a, T: UserData + 'a> FromLua<'a> for T {
+//     type Output = &'a T;
+//
+//     fn from_lua(ptr: *mut sys::lua_State, idx: i32) -> Option<Self::Output> {
+//         if unsafe { sys::lua_isuserdata(ptr, idx) != 0 } {
+//             let ptr = unsafe { sys::lua_touserdata(ptr, idx) };
+//             let aligned = ptr.cast() as *mut T;
+//             unsafe { aligned.as_ref() }
+//         } else {
+//             None
+//         }
+//     }
+// }
 
 generate_from_lua_tuple_impl!();

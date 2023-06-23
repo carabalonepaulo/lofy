@@ -58,18 +58,6 @@ impl State {
         println!("-----------------------------------");
     }
 
-    pub fn inspect(&mut self) {
-        self.get_global("pp");
-        self.push_value(-2);
-        self.call(1, 0);
-    }
-
-    pub fn inspect_globals(&mut self) {
-        self.get_global("_G");
-        self.inspect();
-        self.pop(1);
-    }
-
     pub fn owned(&self) -> bool {
         self.1
     }
@@ -133,21 +121,9 @@ impl State {
         unsafe { sys::lua_getglobal(self.0, str.into_raw()) }
     }
 
-    pub fn push_value(&mut self, idx: i32) {
-        unsafe { sys::lua_pushvalue(self.0, idx) }
-    }
-
-    pub fn call(&mut self, nargs: i32, nresults: i32) {
-        unsafe { sys::lua_call(self.0, nargs, nresults) }
-    }
-
-    pub fn pcall(&mut self, nargs: i32, nresults: i32) -> Result<(), &str> {
-        if unsafe { sys::lua_pcall(self.0, nargs, nresults, 0) } != 0 {
-            Err(self.cast_to::<&str>(-1).unwrap())
-        } else {
-            Ok(())
-        }
-    }
+    // pub fn push_value(&mut self, idx: i32) {
+    //     unsafe { sys::lua_pushvalue(self.0, idx) }
+    // }
 
     pub fn cast_to<'a, T: FromLua<'a>>(&self, idx: i32) -> Option<T::Output> {
         T::from_lua(self.0, idx)
@@ -161,7 +137,7 @@ impl State {
         if unsafe { sys::lua_pcall(self.0, A::len(), B::len(), 0) } != 0 {
             Err(self.cast_to::<&str>(-1).unwrap())
         } else {
-            if let Some(v) = B::from_lua(self.0, -1) {
+            if let Some(v) = B::from_lua(self.0, B::len() * -1) {
                 Ok(v)
             } else {
                 Err("Failed to cast output.")
@@ -180,9 +156,9 @@ impl Drop for State {
 
 #[cfg(test)]
 pub mod tests {
-    use macros::{cstr, lua_func, lua_method, user_data};
+    use macros::{cstr, lua_func, lua_method, ref_to, user_data};
 
-    use crate::{RelativeValue, UserData};
+    use crate::UserData;
 
     use super::*;
 
@@ -327,10 +303,18 @@ pub mod tests {
                 state.push(10);
                 1
             }
+
+            fn bar(&self) -> i32 {
+                123
+            }
         }
 
         let mut state = State::new();
         state.push(Test {});
+
+        let result = state.cast_to::<&Test>(-1);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().bar(), 123);
     }
 
     #[test]
@@ -371,21 +355,12 @@ pub mod tests {
         assert_eq!(state.get_top(), 1);
         assert!(state.is::<Math>(-1));
 
-        state.set_global("math");
-        assert_eq!(state.get_top(), 0);
-
-        state.get_global("math");
-        assert_eq!(state.get_top(), 1);
-
         state.get_field(-1, "sum");
         assert_eq!(state.get_top(), 2);
 
-        state.push_value(-2);
-        state.push(10);
-        state.push(12.0);
-        state.call(3, 1);
-        assert_eq!(state.get_top(), 2);
-        assert_eq!(state.cast_to::<f64>(-1).unwrap(), 22.0);
+        let result = state.protected_call::<_, f64>((ref_to!(Math, -2), 10, 12.0));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 22.0);
     }
 
     #[test]
@@ -399,6 +374,7 @@ pub mod tests {
         impl Test {
             pub fn foo(&mut self, state: &mut State) -> i32 {
                 let is_user_data = state.is::<Test>(1);
+                println!("is ud: {}", is_user_data);
                 state.push(is_user_data);
 
                 let a = state.cast_to::<f64>(2).unwrap_or(0.0);
@@ -422,24 +398,9 @@ pub mod tests {
         state.push(Test { a: 10 });
         state.get_field(-1, "foo");
 
-        let relative_value = RelativeValue::<Test>::new(-2);
-        let result = state.protected_call::<_, (bool, f32)>((relative_value, 2, 3));
-        if result.is_err() {
-            let msg = result.err().unwrap();
-            println!("{}", msg);
-        }
+        let result = state.protected_call::<_, (bool, f32)>((ref_to!(Test, -2), 2, 3));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), (true, 5.0));
-
-        // let result = state.protected_call::<f64>(3, 2);
-        // assert!(result.is_ok());
-        // assert_eq!(result.unwrap(), 5);
-
-        // assert_eq!(state.get_top(), 3);
-        // assert_eq!(state.to_bool(-2).unwrap(), true);
-        // assert_eq!(state.to_number(-1).unwrap(), 5.);
-
-        // dbg!(state.stack());
     }
 
     #[test]

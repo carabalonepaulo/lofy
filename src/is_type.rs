@@ -55,22 +55,12 @@ impl<T: UserData> IsType for T {
             return false;
         }
 
-        // if unsafe { sys::lua_getmetatable(ptr, idx) == 0 } {
-        //     return false;
-        // }
-        //
-        // unsafe { sys::lua_getfield(ptr, -1, cstr!("__name")) }
-        // if unsafe { sys::lua_isnil(ptr, -1) == 1 } {
-        //     unsafe { sys::lua_pop(ptr, 1) };
-        //     return false;
-        // }
-        //
-        // if T::name() == unsafe { sys::lua_tostring(ptr, -1) } {
-        //     unsafe { sys::lua_pop(ptr, 2) };
-        //     return true;
-        // }
+        if unsafe { sys::lua_getmetatable(ptr, idx) == 0 } {
+            return false;
+        }
+        unsafe { sys::lua_pop(ptr, 1) };
 
-        false
+        true
     }
 }
 
