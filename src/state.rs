@@ -9,12 +9,6 @@ use crate::{
 
 pub struct State(*mut sys::lua_State, bool);
 
-impl Clone for State {
-    fn clone(&self) -> Self {
-        Self::from_raw(self.0)
-    }
-}
-
 impl State {
     const PP: &str = include_str!("./pp.lua");
 
@@ -296,7 +290,7 @@ pub mod tests {
 
         #[user_data]
         impl Test {
-            pub fn foo(&mut self, state: &mut State) -> i32 {
+            pub fn foo(&mut self, state: &State) -> i32 {
                 state.push(10);
                 1
             }
@@ -319,12 +313,12 @@ pub mod tests {
         struct Math;
 
         impl Math {
-            fn new(state: &mut State) -> usize {
+            fn new(state: &State) -> usize {
                 state.push(Math {});
                 1
             }
 
-            fn sum(&mut self, state: &mut State) -> usize {
+            fn sum(&mut self, state: &State) -> usize {
                 let a = state.cast_to::<f64>(-2).unwrap();
                 let b = state.cast_to::<f64>(-1).unwrap();
 
@@ -369,7 +363,7 @@ pub mod tests {
 
         #[user_data]
         impl Test {
-            pub fn foo(&mut self, state: &mut State) -> i32 {
+            pub fn foo(&mut self, state: &State) -> i32 {
                 let is_user_data = state.is::<Test>(1);
                 state.push(is_user_data);
 
@@ -398,16 +392,4 @@ pub mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), (true, 5.0));
     }
-
-    #[test]
-    fn proc_macro_raw_static_functions() {}
-
-    #[test]
-    fn proc_macro_wrapped_function() {}
-
-    #[test]
-    fn proc_macro_wrapped_static_function() {}
-
-    #[test]
-    fn return_multiple_values_using_tuple() {}
 }

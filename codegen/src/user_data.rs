@@ -64,7 +64,7 @@ fn gen_raw_method(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> TokenS
                     let mut user_data = unsafe { sys::lua_touserdata(raw_state, 1) as *mut #ty_ident };
 
                     let self_ref = &mut *user_data;
-                    let n = #ty_ident::#fn_ident(self_ref, &mut state);
+                    let n = #ty_ident::#fn_ident(self_ref, &state);
 
                     n as std::ffi::c_int
                 }
@@ -85,7 +85,7 @@ fn gen_raw_mut_method(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> To
                     let mut user_data = unsafe { sys::lua_touserdata(raw_state, 1) as *mut #ty_ident };
 
                     let self_mut_ref = &mut *user_data;
-                    let n = #ty_ident::#fn_ident(self_mut_ref, &mut state);
+                    let n = #ty_ident::#fn_ident(self_mut_ref, &state);
 
                     n as std::ffi::c_int
                 }
@@ -121,12 +121,12 @@ pub fn gen_user_data_impl(ty: Impl) -> TokenStream {
             let fn_str = proc_macro2::Literal::string(&fn_ident.to_string());
 
             // raw methods:
-            // - (&self, &mut State)
-            // - (&mut self, &mut State)
+            // - (&self, &State)
+            // - (&mut self, &State)
             //
             // raw static:
-            // - (&mut State)
-            // - (&mut State)
+            // - (&State)
+            // - (&State)
             //
             // methods:
             // - (&self, ...)
