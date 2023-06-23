@@ -1,14 +1,20 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+pub mod tuple_impl;
+mod user_data;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+use proc_macro2::TokenStream;
+use quote::quote;
+use venial::{parse_declaration, Declaration};
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+pub fn generate_user_data_impl(item: TokenStream) -> TokenStream {
+    let ty = match parse_declaration(item.clone()) {
+        Ok(Declaration::Impl(ty)) => ty,
+        _ => panic!("user_data attribute can only be used with impl."),
+    };
+
+    let user_data_impl = user_data::gen_user_data_impl(ty);
+
+    quote! {
+        #item
+        #user_data_impl
     }
 }
