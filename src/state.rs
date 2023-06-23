@@ -62,11 +62,11 @@ impl State {
         self.1
     }
 
-    pub fn open_libs(&mut self) {
+    pub fn open_libs(&self) {
         unsafe { sys::luaL_openlibs(self.0) }
     }
 
-    pub fn open_pp(&mut self) {
+    pub fn open_pp(&self) {
         self.do_string(Self::PP).unwrap();
         self.pop(1);
     }
@@ -75,7 +75,7 @@ impl State {
         T::is_type(self.0, idx)
     }
 
-    pub fn do_string(&mut self, code: &str) -> Result<(), &str> {
+    pub fn do_string(&self, code: &str) -> Result<(), &str> {
         let cstring = CString::new(code).unwrap();
         unsafe { sys::luaL_loadstring(self.0, cstring.as_ptr() as *const i8) };
         if unsafe { sys::lua_pcall(self.0, 0, sys::LUA_MULTRET, 0) } != 0 {
@@ -85,7 +85,7 @@ impl State {
         }
     }
 
-    pub fn set_top(&mut self, idx: i32) {
+    pub fn set_top(&self, idx: i32) {
         unsafe { sys::lua_settop(self.0, idx) }
     }
 
@@ -93,30 +93,30 @@ impl State {
         unsafe { sys::lua_gettop(self.0) }
     }
 
-    pub fn pop(&mut self, idx: i32) {
+    pub fn pop(&self, idx: i32) {
         unsafe { sys::lua_pop(self.0, idx) }
     }
 
-    pub fn push(&mut self, value: impl ToLua) {
+    pub fn push(&self, value: impl ToLua) {
         value.to_lua(self.0);
     }
 
-    pub fn set_field(&mut self, idx: i32, name: &str) {
+    pub fn set_field(&self, idx: i32, name: &str) {
         let name = CString::new(name).unwrap();
         unsafe { sys::lua_setfield(self.0, idx, name.into_raw()) }
     }
 
-    pub fn get_field(&mut self, idx: i32, name: &str) {
+    pub fn get_field(&self, idx: i32, name: &str) {
         let name = CString::new(name).unwrap();
         unsafe { sys::lua_getfield(self.0, idx, name.into_raw()) }
     }
 
-    pub fn set_global(&mut self, name: &str) {
+    pub fn set_global(&self, name: &str) {
         let str = CString::new(name).unwrap();
         unsafe { sys::lua_setglobal(self.0, str.into_raw()) }
     }
 
-    pub fn get_global(&mut self, name: &str) {
+    pub fn get_global(&self, name: &str) {
         let str = CString::new(name).unwrap();
         unsafe { sys::lua_getglobal(self.0, str.into_raw()) }
     }
@@ -129,10 +129,7 @@ impl State {
         T::from_lua(self.0, idx)
     }
 
-    pub fn protected_call<'a, A: ToLua, B: FromLua<'a>>(
-        &mut self,
-        args: A,
-    ) -> Result<B::Output, &str> {
+    pub fn protected_call<'a, A: ToLua, B: FromLua<'a>>(&self, args: A) -> Result<B::Output, &str> {
         self.push(args);
         if unsafe { sys::lua_pcall(self.0, A::len(), B::len(), 0) } != 0 {
             Err(self.cast_to::<&str>(-1).unwrap())
@@ -170,7 +167,7 @@ pub mod tests {
 
     #[test]
     fn push_int() {
-        let mut state = State::new();
+        let state = State::new();
         state.push(10 as i32);
         state.push(20 as i64);
 
@@ -181,7 +178,7 @@ pub mod tests {
 
     #[test]
     fn push_float() {
-        let mut state = State::new();
+        let state = State::new();
         state.push(10.5 as f32);
         state.push(9.8 as f64);
 
@@ -192,7 +189,7 @@ pub mod tests {
 
     #[test]
     fn push_string() {
-        let mut state = State::new();
+        let state = State::new();
         let name = "Soreto".to_string();
 
         state.push(name.as_str());
@@ -205,7 +202,7 @@ pub mod tests {
 
     #[test]
     fn protected_call_with_single_return_arg() {
-        let mut state = State::new();
+        let state = State::new();
         state
             .do_string("function sum(a, b) return a + b end")
             .unwrap();
@@ -218,7 +215,7 @@ pub mod tests {
 
     #[test]
     fn protected_call_with_multi_return() {
-        let mut state = State::new();
+        let state = State::new();
         state
             .do_string("function double(a, b) return a * 2, b * 2 end")
             .unwrap();
@@ -230,7 +227,7 @@ pub mod tests {
 
     #[test]
     fn push_bool() {
-        let mut state = State::new();
+        let state = State::new();
         state.push(false);
         state.push(true);
 
@@ -241,7 +238,7 @@ pub mod tests {
 
     #[test]
     fn push_tuple_with_different_types() {
-        let mut state = State::new();
+        let state = State::new();
         state.push((10, false, "soreto"));
 
         assert_eq!(state.get_top(), 3);
@@ -252,7 +249,7 @@ pub mod tests {
 
     #[test]
     fn push_tuples_2() {
-        let mut state = State::new();
+        let state = State::new();
         state.push((10, 20));
 
         assert_eq!(state.get_top(), 2);
@@ -262,7 +259,7 @@ pub mod tests {
 
     #[test]
     fn push_tuples_3() {
-        let mut state = State::new();
+        let state = State::new();
         state.push((10, 20, 30));
 
         assert_eq!(state.get_top(), 3);
@@ -274,7 +271,7 @@ pub mod tests {
     #[test]
     fn tuple_from_lua() {
         let value = (10, 20, 30);
-        let mut state = State::new();
+        let state = State::new();
         state.push(value);
 
         let result = state.cast_to::<(i32, i32, i32)>(1);
@@ -285,7 +282,7 @@ pub mod tests {
     #[test]
     fn mixed_tuple_from_lua() {
         let value = (10, false, "soreto");
-        let mut state = State::new();
+        let state = State::new();
         state.push(value);
 
         let result = state.cast_to::<(i32, bool, &str)>(1);
@@ -309,7 +306,7 @@ pub mod tests {
             }
         }
 
-        let mut state = State::new();
+        let state = State::new();
         state.push(Test {});
 
         let result = state.cast_to::<&Test>(-1);
@@ -349,7 +346,7 @@ pub mod tests {
             }
         }
 
-        let mut state = State::new();
+        let state = State::new();
         state.push(Math {});
 
         assert_eq!(state.get_top(), 1);
@@ -374,7 +371,6 @@ pub mod tests {
         impl Test {
             pub fn foo(&mut self, state: &mut State) -> i32 {
                 let is_user_data = state.is::<Test>(1);
-                println!("is ud: {}", is_user_data);
                 state.push(is_user_data);
 
                 let a = state.cast_to::<f64>(2).unwrap_or(0.0);
@@ -394,7 +390,7 @@ pub mod tests {
         let func_name = from_ptr!(funcs[0].name);
         assert_eq!(func_name, "foo");
 
-        let mut state = State::new();
+        let state = State::new();
         state.push(Test { a: 10 });
         state.get_field(-1, "foo");
 
