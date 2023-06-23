@@ -1,5 +1,6 @@
 use crate::{AnyUserData, Coroutine, LightUserData, LuaFunction, NativeFunction, Table, UserData};
 use luajit2_sys as sys;
+use macros::cstr;
 
 pub trait IsType {
     fn is_type(ptr: *mut sys::lua_State, idx: i32) -> bool;
@@ -50,17 +51,7 @@ impl IsType for String {
 impl<T: UserData> IsType for T {
     #[inline]
     fn is_type(ptr: *mut sys::lua_State, idx: i32) -> bool {
-        let ptr = ptr;
-        if unsafe { sys::lua_isuserdata(ptr, idx) == 0 } {
-            return false;
-        }
-
-        if unsafe { sys::lua_getmetatable(ptr, idx) == 0 } {
-            return false;
-        }
-        unsafe { sys::lua_pop(ptr, 1) };
-
-        true
+        unsafe { sys::lua_isuserdata(ptr, idx) != 0 }
     }
 }
 
