@@ -75,6 +75,13 @@ impl ToLua for String {
     }
 }
 
+impl ToLua for () {
+    #[inline]
+    fn to_lua(self, state: *mut sys::lua_State) {
+        unsafe { sys::lua_pushnil(state) }
+    }
+}
+
 impl ToLua for RawFunction {
     #[inline]
     fn to_lua(self, state: *mut sys::lua_State) {

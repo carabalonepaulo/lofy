@@ -49,3 +49,23 @@ macro_rules! lua_method {
         }
     }};
 }
+
+#[macro_export]
+macro_rules! lua_fn {
+    // single => single
+    ($value_ty:ty => $return_value_ty:ty) => {
+        LuaFunction<$value_ty, $return_value_ty>
+    };
+    // single => many
+    ($value_ty:ty => $($return_value_ty:ty,)+) => {
+        LuaFunction<$value_ty, ($($return_value_ty,)*)>
+    };
+    // many => single
+    ($($value_ty:ty,)+ => $return_value_ty:ty) => {
+        LuaFunction<($($value_ty,)*), $return_value_ty>
+    };
+    // many => many
+    ($($value_ty:ty),+ => $($return_value_ty:ty),+) => {
+        LuaFunction<($($value_ty,)*), ($($return_value_ty),*)>
+    };
+}

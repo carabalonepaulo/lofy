@@ -3,8 +3,8 @@ use std::ffi::CString;
 use luajit2_sys as sys;
 
 use crate::{
-    from_lua::FromLua, is_type::IsType, to_lua::ToLua, AnyUserData, Coroutine, LightUserData,
-    LuaFunction, NativeFunction, Table,
+    from_lua::FromLua, is_type::IsType, to_lua::ToLua, AnyLuaFunction, AnyUserData, Coroutine,
+    LightUserData, NativeFunction, Table,
 };
 
 pub struct State(*mut sys::lua_State, bool);
@@ -33,7 +33,7 @@ impl State {
                 println!("{}", self.cast_to::<&str>(i).unwrap());
             } else if self.is::<bool>(i) {
                 println!("{}", self.cast_to::<bool>(i).unwrap());
-            } else if self.is::<LuaFunction>(i) {
+            } else if self.is::<AnyLuaFunction>(i) {
                 println!("func");
             } else if self.is::<Table>(i) {
                 println!("table");
@@ -52,7 +52,7 @@ impl State {
         println!("-----------------------------------");
     }
 
-    pub fn owned(&self) -> bool {
+    pub(crate) fn owned(&self) -> bool {
         self.1
     }
 
@@ -95,29 +95,29 @@ impl State {
         value.to_lua(self.0);
     }
 
-    pub fn set_field(&self, idx: i32, name: &str) {
+    pub fn set_field(&self, idx: i32, name: &str, value: impl ToLua) {
+        self.push(value);
         let name = CString::new(name).unwrap();
         unsafe { sys::lua_setfield(self.0, idx, name.into_raw()) }
     }
 
-    pub fn get_field(&self, idx: i32, name: &str) {
+    pub fn get_field<'a, A: FromLua<'a>>(&self, idx: i32, name: &str) -> Option<A::Output> {
         let name = CString::new(name).unwrap();
-        unsafe { sys::lua_getfield(self.0, idx, name.into_raw()) }
+        unsafe { sys::lua_getfield(self.0, idx, name.into_raw()) };
+        A::from_lua(self.0, idx)
     }
 
-    pub fn set_global(&self, name: &str) {
+    pub fn set_global(&self, name: &str, value: impl ToLua) {
+        self.push(value);
         let str = CString::new(name).unwrap();
         unsafe { sys::lua_setglobal(self.0, str.into_raw()) }
     }
 
-    pub fn get_global(&self, name: &str) {
+    pub fn get_global<'a, T: FromLua<'a>>(&self, name: &str) -> Option<T::Output> {
         let str = CString::new(name).unwrap();
-        unsafe { sys::lua_getglobal(self.0, str.into_raw()) }
+        unsafe { sys::lua_getglobal(self.0, str.into_raw()) };
+        self.cast_to::<T>(-1)
     }
-
-    // pub fn push_value(&mut self, idx: i32) {
-    //     unsafe { sys::lua_pushvalue(self.0, idx) }
-    // }
 
     pub fn cast_to<'a, T: FromLua<'a>>(&self, idx: i32) -> Option<T::Output> {
         T::from_lua(self.0, idx)
@@ -149,7 +149,7 @@ impl Drop for State {
 pub mod tests {
     use macros::{cstr, lua_func, lua_method, ref_to, user_data};
 
-    use crate::UserData;
+    use crate::{LuaFunction, RelativeValue, UserData};
 
     use super::*;
 
@@ -200,7 +200,7 @@ pub mod tests {
         state
             .do_string("function sum(a, b) return a + b end")
             .unwrap();
-        state.get_global("sum");
+        state.get_global::<LuaFunction<(i32, i32), i32>>("sum");
 
         let result = state.protected_call::<_, i32>((2, 3));
         assert!(result.is_ok());
@@ -208,15 +208,32 @@ pub mod tests {
     }
 
     #[test]
-    fn protected_call_with_multi_return() {
+    fn calling_lua_from_rust_multiple_return() {
         let state = State::new();
         state
             .do_string("function double(a, b) return a * 2, b * 2 end")
             .unwrap();
-        state.get_global("double");
 
-        let result = state.protected_call::<_, (i32, i32)>((4, 8));
+        let option = state.get_global::<LuaFunction<(i32, i32), (i32, i32)>>("double");
+        assert!(option.is_some());
+
+        let double = option.unwrap();
+        let result = double((4, 8));
         assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (8, 16));
+    }
+
+    #[test]
+    fn calling_lua_from_rust_single_return() {
+        let state = State::new();
+        state
+            .do_string("function double(a) return a * 2 end")
+            .unwrap();
+
+        let double = state.get_global::<LuaFunction<i32, i32>>("double").unwrap();
+        let result = double(10);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 20);
     }
 
     #[test]
@@ -346,10 +363,11 @@ pub mod tests {
         assert_eq!(state.get_top(), 1);
         assert!(state.is::<Math>(-1));
 
-        state.get_field(-1, "sum");
-        assert_eq!(state.get_top(), 2);
+        let option = state.get_field::<LuaFunction<(f64, f64), f64>>(-1, "sum");
+        assert!(option.is_some());
 
-        let result = state.protected_call::<_, f64>((ref_to!(Math, -2), 10, 12.0));
+        let sum = option.unwrap();
+        let result = sum((10.0, 12.0));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 22.0);
     }
@@ -383,10 +401,88 @@ pub mod tests {
 
         let state = State::new();
         state.push(Test {});
-        state.get_field(-1, "foo");
+        let option =
+            state.get_field::<LuaFunction<(RelativeValue<Test>, i32, i32), (bool, f32)>>(-1, "foo");
+        assert!(option.is_some());
 
-        let result = state.protected_call::<_, (bool, f32)>((ref_to!(Test, -2), 2, 3));
+        let foo = option.unwrap();
+        let result = foo((ref_to!(Test, -2), 2, 3));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), (true, 5.0));
+    }
+
+    #[test]
+    fn proc_macro_pub_function() {}
+
+    #[test]
+    fn proc_macro_pub_method_manual_impl() {
+        struct Test {
+            a: i32,
+        }
+
+        impl Test {
+            pub fn foo(&self, b: i32, c: i32) -> i32 {
+                self.a + b + c
+            }
+        }
+
+        impl UserData for Test {
+            fn name() -> *const i8 {
+                cstr!("Test")
+            }
+
+            fn functions() -> Vec<sys::luaL_Reg> {
+                vec![{
+                    type Args = (i32, i32);
+                    extern "C" fn step(ptr: *mut sys::lua_State) -> std::ffi::c_int {
+                        let state = State::from_raw(ptr);
+                        let len = <Args as FromLua>::len() + 1;
+                        let idx = len * -1;
+
+                        let ud = state.cast_to::<&Test>(idx).unwrap();
+                        let args = state.cast_to::<Args>(idx + 1).unwrap();
+                        let result = ud.foo(args.0, args.1);
+
+                        state.push(result);
+                        <i32 as ToLua>::len() as std::ffi::c_int
+                    }
+                    luajit2_sys::luaL_Reg {
+                        name: cstr!("foo"),
+                        func: Some(step),
+                    }
+                }]
+            }
+        }
+
+        let state = State::new();
+        state.push(Test { a: 2 });
+        let option =
+            state.get_field::<LuaFunction<(RelativeValue<Test>, i32, i32), i32>>(-1, "foo");
+        assert!(option.is_some());
+
+        let foo = option.unwrap();
+        let result = foo((ref_to!(Test, -2), 2, 3));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 2 + 2 + 3);
+    }
+
+    #[test]
+    fn proc_macro_pub_method() {
+        // struct Test;
+
+        // #[user_data]
+        // impl Test {
+        //     pub fn foo(&self, a: i32, b: i32) -> i32 {
+        //         a + b
+        //     }
+        // }
+
+        // let state = State::new();
+        // state.push(Test {});
+        // state.get_field(-1, "foo");
+
+        // let result = state.protected_call::<_, i32>((ref_to!(Test, -2), 2, 3));
+        // assert!(result.is_ok());
+        // assert_eq!(result.unwrap(), 2 + 3);
     }
 }

@@ -1,5 +1,8 @@
 use std::marker::PhantomData;
 
+use from_lua::FromLua;
+use to_lua::ToLua;
+
 mod from_lua;
 mod is_type;
 pub mod state;
@@ -9,7 +12,9 @@ pub type RawFunction = unsafe extern "C" fn(state: *mut luajit2_sys::lua_State) 
 
 pub struct NativeFunction;
 
-pub struct LuaFunction;
+pub struct AnyLuaFunction;
+
+pub struct LuaFunction<'a, A: ToLua, B: FromLua<'a>>(i32, PhantomData<&'a A>, PhantomData<B>);
 
 pub struct AnyUserData;
 
@@ -32,6 +37,7 @@ pub trait UserData {
     fn functions() -> Vec<luajit2_sys::luaL_Reg>;
 }
 
+// TODO: ???
 pub trait MetaTable {
     fn index(&mut self) {}
     fn new_index(&mut self) {}

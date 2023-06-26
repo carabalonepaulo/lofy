@@ -1,6 +1,6 @@
 use std::ffi::CStr;
 
-use crate::{state::State, RelativeValue, UserData};
+use crate::{state::State, to_lua::ToLua, LuaFunction, RelativeValue, UserData};
 use luajit2_sys as sys;
 use macros::generate_from_lua_tuple_impl;
 
@@ -106,6 +106,18 @@ impl<'a> FromLua<'a> for String {
     }
 }
 
+impl<'a> FromLua<'a> for () {
+    type Output = ();
+
+    fn from_lua(ptr: *mut sys::lua_State, idx: i32) -> Option<Self::Output> {
+        if unsafe { sys::lua_isnil(ptr, idx) != 0 } {
+            Some(())
+        } else {
+            None
+        }
+    }
+}
+
 impl<'a, T: UserData + 'a> FromLua<'a> for &'a T {
     type Output = &'a T;
 
@@ -131,18 +143,29 @@ impl<'a, T: UserData + 'a> FromLua<'a> for &'a mut T {
         }
     }
 }
-// impl<'a, T: UserData + 'a> FromLua<'a> for T {
-//     type Output = &'a T;
-//
-//     fn from_lua(ptr: *mut sys::lua_State, idx: i32) -> Option<Self::Output> {
-//         if unsafe { sys::lua_isuserdata(ptr, idx) != 0 } {
-//             let ptr = unsafe { sys::lua_touserdata(ptr, idx) };
-//             let aligned = ptr.cast() as *mut T;
-//             unsafe { aligned.as_ref() }
-//         } else {
-//             None
-//         }
-//     }
-// }
+
+impl<'a, A, B> FromLua<'a> for LuaFunction<'a, A, B>
+where
+    A: ToLua,
+    B: FromLua<'a>,
+{
+    type Output = Box<dyn Fn(A) -> Result<B::Output, &'a str>>;
+
+    fn from_lua(ptr: *mut sys::lua_State, _: i32) -> Option<Self::Output> {
+        Some(Box::new(move |args: A| {
+            A::to_lua(args, ptr);
+            if unsafe { sys::lua_pcall(ptr, A::len(), B::len(), 0) } != 0 {
+                let msg = <&str as FromLua<'a>>::from_lua(ptr, -1).unwrap();
+                Err(msg)
+            } else {
+                if let Some(value) = B::from_lua(ptr, B::len() * -1) {
+                    Ok(value)
+                } else {
+                    Err("Failed to cast output.")
+                }
+            }
+        }))
+    }
+}
 
 generate_from_lua_tuple_impl!();

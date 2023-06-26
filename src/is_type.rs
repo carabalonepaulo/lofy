@@ -1,4 +1,7 @@
-use crate::{AnyUserData, Coroutine, LightUserData, LuaFunction, NativeFunction, Table, UserData};
+use crate::{
+    from_lua::FromLua, to_lua::ToLua, AnyLuaFunction, AnyUserData, Coroutine, LightUserData,
+    LuaFunction, NativeFunction, Table, UserData,
+};
 use luajit2_sys as sys;
 
 pub trait IsType {
@@ -61,7 +64,18 @@ impl IsType for NativeFunction {
     }
 }
 
-impl IsType for LuaFunction {
+impl IsType for AnyLuaFunction {
+    #[inline]
+    fn is_type(ptr: *mut sys::lua_State, idx: i32) -> bool {
+        unsafe { sys::lua_isfunction(ptr, idx) != 0 }
+    }
+}
+
+impl<'a, A, B> IsType for LuaFunction<'a, A, B>
+where
+    A: ToLua,
+    B: FromLua<'a>,
+{
     #[inline]
     fn is_type(ptr: *mut sys::lua_State, idx: i32) -> bool {
         unsafe { sys::lua_isfunction(ptr, idx) != 0 }

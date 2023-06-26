@@ -1,6 +1,6 @@
 use proc_macro2::{Ident, Literal, TokenStream, TokenTree};
 use quote::quote;
-use venial::{FnParam, Function, Impl, ImplMember};
+use venial::{FnParam, Function, Impl, ImplMember, Punctuated};
 
 #[allow(unused, dead_code)]
 enum ParamsInfo {
@@ -8,12 +8,23 @@ enum ParamsInfo {
     RawMethodMut,
 
     RawStatic,
-    RawStaticMut,
 
     Method,
     MethodMut,
 
     Static,
+}
+
+fn is_method(_params: &Punctuated<FnParam>) -> bool {
+    // let tokens = &second_param.ty.tokens;
+    // if tokens.len() == 2 {
+    //     let TokenTree::Punct(_) = tokens[0] else { return; };
+    //     true
+    // } else {
+    //     false
+    // }
+
+    false
 }
 
 fn params_info(func: &Function) -> Option<ParamsInfo> {
@@ -28,22 +39,26 @@ fn params_info(func: &Function) -> Option<ParamsInfo> {
     // raw method | method with single arg
     } else if func.params.len() == 2 {
         match &func.params[0].0 {
-            FnParam::Receiver(param) => {
+            FnParam::Receiver(first_param) => {
                 // no ref allowed?
                 // if param.tk_ref.is_some() {
                 //     return None;
                 // }
 
                 // only Self allowed, anything else ignored
-                if &param.tk_self.to_string() != "self" {
+                if &first_param.tk_self.to_string() != "self" {
                     return None;
                 }
 
-                Some(if param.tk_mut.is_some() {
-                    ParamsInfo::RawMethodMut
+                if is_method(&func.params) {
+                    None
                 } else {
-                    ParamsInfo::RawMethod
-                })
+                    Some(if first_param.tk_mut.is_some() {
+                        ParamsInfo::RawMethodMut
+                    } else {
+                        ParamsInfo::RawMethod
+                    })
+                }
             }
             FnParam::Typed(_) => None,
         }
@@ -81,18 +96,54 @@ fn gen_raw_mut_method(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> To
             func: {
                 unsafe extern "C" fn step(raw_state: *mut sys::lua_State) -> std::ffi::c_int {
                     let mut state = State::from_raw(raw_state);
-                    // TODO: check userdata
-                    let mut user_data = unsafe { sys::lua_touserdata(raw_state, 1) as *mut #ty_ident };
-
-                    let self_mut_ref = &mut *user_data;
+                    let self_mut_ref = state.cast_to::<&mut #ty_ident>(1).unwrap();
                     let n = #ty_ident::#fn_ident(self_mut_ref, &state);
-
                     n as std::ffi::c_int
                 }
                 Some(step)
             },
         }
     }
+}
+
+fn gen_raw_static() -> TokenStream {
+    todo!()
+}
+
+fn gen_static() -> TokenStream {
+    todo!()
+}
+
+fn gen_method(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> TokenStream {
+    let ty_result: Ident = ty_ident.clone();
+    let ty_args: Vec<TokenStream> = vec![];
+    let args_call: Vec<TokenStream> = vec![];
+
+    quote! {
+        luajit2_sys::luaL_Reg {
+            name: cstr!(#fn_str),
+            func: {
+                type Args = (#(#ty_args,)*);
+                extern "C" fn step(ptr: *mut sys::lua_State) -> std::ffi::c_int {
+                    let state = State::from_raw(ptr);
+                    let len = <Args as FromLua>::len() + 1;
+                    let idx = len * -1;
+
+                    let ud = state.cast_to::<&#ty_ident>(idx).unwrap();
+                    let args = state.cast_to::<Args>(idx + 1).unwrap();
+                    let result = ud.#fn_ident(#(#args_call,)*);
+
+                    state.push(result);
+                    <#ty_result as ToLua>::len() as std::ffi::c_int
+                }
+                Some(step)
+            },
+        }
+    }
+}
+
+fn gen_mut_method() -> TokenStream {
+    todo!()
 }
 
 pub fn gen_user_data_impl(ty: Impl) -> TokenStream {
@@ -126,7 +177,6 @@ pub fn gen_user_data_impl(ty: Impl) -> TokenStream {
             //
             // raw static:
             // - (&State)
-            // - (&State)
             //
             // methods:
             // - (&self, ...)
@@ -144,11 +194,10 @@ pub fn gen_user_data_impl(ty: Impl) -> TokenStream {
                     ParamsInfo::RawMethodMut => {
                         decls.push(gen_raw_mut_method(&ty_ident, fn_ident, fn_str))
                     }
-                    ParamsInfo::RawStatic => todo!(),
-                    ParamsInfo::RawStaticMut => todo!(),
-                    ParamsInfo::Method => todo!(),
-                    ParamsInfo::MethodMut => todo!(),
-                    ParamsInfo::Static => todo!(),
+                    ParamsInfo::RawStatic => decls.push(gen_raw_static()),
+                    ParamsInfo::Static => decls.push(gen_static()),
+                    ParamsInfo::Method => decls.push(gen_method(&ty_ident, fn_ident, fn_str)),
+                    ParamsInfo::MethodMut => decls.push(gen_mut_method()),
                 }
             }
 
