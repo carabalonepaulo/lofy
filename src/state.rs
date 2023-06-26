@@ -160,6 +160,18 @@ pub mod tests {
     }
 
     #[test]
+    fn test_macro() {
+        struct Test;
+
+        #[user_data]
+        impl Test {
+            pub fn foo(&self) {}
+        }
+
+        let state = State::new();
+    }
+
+    #[test]
     fn push_int() {
         let state = State::new();
         state.push(10 as i32);
@@ -378,7 +390,7 @@ pub mod tests {
 
         #[user_data]
         impl Test {
-            pub fn foo(&mut self, state: &State) -> i32 {
+            pub fn foo(&self, state: &State) -> i32 {
                 let is_user_data = state.is::<Test>(1);
                 state.push(is_user_data);
 

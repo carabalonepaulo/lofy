@@ -1,102 +1,134 @@
-use proc_macro2::{Ident, Literal, TokenStream, TokenTree};
+use proc_macro2::{Ident, Literal, Punct, Span, TokenStream, TokenTree};
 use quote::quote;
 use venial::{FnParam, Function, Impl, ImplMember, Punctuated};
 
 #[allow(unused, dead_code)]
 enum ParamsInfo {
-    RawMethod,
-    RawMethodMut,
+    RawMethod(bool),
 
     RawStatic,
 
-    Method,
-    MethodMut,
+    MethodNoArgNoReturn(bool),
 
-    Static,
+    Method(bool, TokenStream, TokenStream),
+
+    Static(TokenStream, TokenStream),
 }
 
-fn is_method(_params: &Punctuated<FnParam>) -> bool {
-    // let tokens = &second_param.ty.tokens;
-    // if tokens.len() == 2 {
-    //     let TokenTree::Punct(_) = tokens[0] else { return; };
-    //     true
-    // } else {
-    //     false
-    // }
+fn get_args_ty(func: &Function) -> (TokenStream, TokenStream) {
+    let mut params_ty = vec![];
+    for (param, _) in &func.params[1..] {
+        let FnParam::Typed(param) = param else { continue; };
+        params_ty.push(param.ty.clone());
+    }
+    let return_ty = func.return_ty.clone();
+    (quote!((#(#params_ty,)*)), quote!(#return_ty))
+}
 
-    false
+fn is_self_param(param: &FnParam) -> Option<bool> {
+    let FnParam::Receiver(first_param) = param else { return None; };
+    if first_param.tk_ref.is_none() || &first_param.tk_self.to_string().to_lowercase() != "self" {
+        None
+    } else {
+        Some(first_param.tk_mut.is_some())
+    }
+}
+
+fn is_state_param(tokens: &Vec<TokenTree>) -> bool {
+    let TokenTree::Punct(punct) = &tokens[0] else { return false; };
+
+    if punct.as_char() != '&' {
+        return false;
+    }
+
+    let TokenTree::Ident(ident) = &tokens[1] else { return false; };
+    ident.to_string().rfind("State").is_some()
 }
 
 fn params_info(func: &Function) -> Option<ParamsInfo> {
     // raw static | instance with no args
     if func.params.len() == 1 {
         match &func.params[0].0 {
-            FnParam::Receiver(_) => None,
-            FnParam::Typed(_) => {
-                todo!()
+            FnParam::Receiver(param) => {
+                Some(ParamsInfo::MethodNoArgNoReturn(param.tk_mut.is_some()))
+            }
+            FnParam::Typed(param) => {
+                if is_state_param(&param.ty.tokens) {
+                    Some(ParamsInfo::RawStatic)
+                } else {
+                    None
+                }
             }
         }
     // raw method | method with single arg
     } else if func.params.len() == 2 {
-        match &func.params[0].0 {
-            FnParam::Receiver(first_param) => {
-                // no ref allowed?
-                // if param.tk_ref.is_some() {
-                //     return None;
-                // }
-
-                // only Self allowed, anything else ignored
-                if &first_param.tk_self.to_string() != "self" {
-                    return None;
-                }
-
-                if is_method(&func.params) {
-                    None
-                } else {
-                    Some(if first_param.tk_mut.is_some() {
-                        ParamsInfo::RawMethodMut
-                    } else {
-                        ParamsInfo::RawMethod
-                    })
-                }
-            }
-            FnParam::Typed(_) => None,
+        let Some(is_mut) = is_self_param(&func.params[0].0) else { return None; };
+        let FnParam::Typed(second_param) = &func.params[1].0 else { return None; };
+        if is_state_param(&second_param.ty.tokens) {
+            Some(ParamsInfo::RawMethod(is_mut))
+        } else {
+            None
         }
-    // method | static
+    // method | static => not yet
     } else {
-        None
-    }
-}
-
-fn gen_raw_method(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> TokenStream {
-    quote! {
-        sys::luaL_Reg {
-            name: cstr!(#fn_str),
-            func: {
-                unsafe extern "C" fn step(raw_state: *mut sys::lua_State) -> std::ffi::c_int {
-                    let mut state = State::from_raw(raw_state);
-                    // TODO: check userdata
-                    let mut user_data = unsafe { sys::lua_touserdata(raw_state, 1) as *mut #ty_ident };
-
-                    let self_ref = &mut *user_data;
-                    let n = #ty_ident::#fn_ident(self_ref, &state);
-
-                    n as std::ffi::c_int
-                }
-                Some(step)
-            },
+        if let Some(is_mut) = is_self_param(&func.params[0].0) {
+            let (args_ty, return_ty) = get_args_ty(&func);
+            Some(ParamsInfo::Method(is_mut, args_ty, return_ty))
+        } else {
+            let (args_ty, return_ty) = get_args_ty(&func);
+            Some(ParamsInfo::Static(args_ty, return_ty))
         }
     }
 }
 
-fn gen_raw_mut_method(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> TokenStream {
+// fn gen_raw_method(
+//     _is_mut: bool,
+//     ty_ident: &Ident,
+//     fn_ident: &Ident,
+//     fn_str: Literal,
+// ) -> TokenStream {
+//     quote! {
+//         sys::luaL_Reg {
+//             name: cstr!(#fn_str),
+//             func: {
+//                 unsafe extern "C" fn step(raw_state: *mut sys::lua_State) -> std::ffi::c_int {
+//                     let mut state = State::from_raw(raw_state);
+//                     // TODO: check userdata
+//                     let mut user_data = unsafe { sys::lua_touserdata(raw_state, 1) as *mut #ty_ident };
+//
+//                     let self_ref = &mut *user_data;
+//                     let n = #ty_ident::#fn_ident(self_ref, &state);
+//
+//                     n as std::ffi::c_int
+//                 }
+//                 Some(step)
+//             },
+//         }
+//     }
+// }
+fn get_self_ty(is_mut: bool, ty: &Ident) -> TokenStream {
+    if is_mut {
+        quote!(&mut #ty)
+    } else {
+        quote!(&#ty)
+    }
+}
+
+fn gen_raw_method(
+    is_mut: bool,
+    ty_ident: &Ident,
+    fn_ident: &Ident,
+    fn_str: Literal,
+) -> TokenStream {
+    let ty_self = get_self_ty(is_mut, ty_ident);
+
     quote! {
         sys::luaL_Reg {
             name: cstr!(#fn_str),
             func: {
                 unsafe extern "C" fn step(raw_state: *mut sys::lua_State) -> std::ffi::c_int {
                     let mut state = State::from_raw(raw_state);
-                    let self_mut_ref = state.cast_to::<&mut #ty_ident>(1).unwrap();
+                    let self_mut_ref = state.cast_to::<#ty_self>(1).unwrap();
                     let n = #ty_ident::#fn_ident(self_mut_ref, &state);
                     n as std::ffi::c_int
                 }
@@ -106,35 +138,15 @@ fn gen_raw_mut_method(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> To
     }
 }
 
-fn gen_raw_static() -> TokenStream {
-    todo!()
-}
-
-fn gen_static() -> TokenStream {
-    todo!()
-}
-
-fn gen_method(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> TokenStream {
-    let ty_result: Ident = ty_ident.clone();
-    let ty_args: Vec<TokenStream> = vec![];
-    let args_call: Vec<TokenStream> = vec![];
-
+// (state: &State)
+fn gen_raw_static(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> TokenStream {
     quote! {
         luajit2_sys::luaL_Reg {
             name: cstr!(#fn_str),
             func: {
-                type Args = (#(#ty_args,)*);
                 extern "C" fn step(ptr: *mut sys::lua_State) -> std::ffi::c_int {
                     let state = State::from_raw(ptr);
-                    let len = <Args as FromLua>::len() + 1;
-                    let idx = len * -1;
-
-                    let ud = state.cast_to::<&#ty_ident>(idx).unwrap();
-                    let args = state.cast_to::<Args>(idx + 1).unwrap();
-                    let result = ud.#fn_ident(#(#args_call,)*);
-
-                    state.push(result);
-                    <#ty_result as ToLua>::len() as std::ffi::c_int
+                    <#ty_ident>::#fn_ident(&state) as std::ffi::c_int
                 }
                 Some(step)
             },
@@ -142,8 +154,86 @@ fn gen_method(ty_ident: &Ident, fn_ident: &Ident, fn_str: Literal) -> TokenStrea
     }
 }
 
-fn gen_mut_method() -> TokenStream {
-    todo!()
+fn gen_static(
+    ident: &Ident,
+    fn_ident: &Ident,
+    fn_str: Literal,
+    args_ty: TokenStream,
+    return_ty: TokenStream,
+) -> TokenStream {
+    quote! {
+        luajit2_sys::luaL_Reg {
+            name: cstr!(#fn_str),
+            func: {
+                extern "C" fn step(ptr: *mut sys::lua_State) -> std::ffi::c_int {
+                    let state = State::from_raw(ptr);
+                    let len = <#args_ty as FromLua>::len();
+                    let idx = len * -1;
+
+                    let args = state.cast_to::<#args_ty>(idx).unwrap();
+                    let result = <#ident>::#fn_ident(args);
+
+                    state.push(result);
+                    <#return_ty as ToLua>::len() as std::ffi::c_int
+                }
+                Some(step)
+            },
+        }
+    }
+}
+
+fn gen_method(
+    is_mut: bool,
+    ident: &Ident,
+    fn_ident: &Ident,
+    fn_str: Literal,
+    args_ty: TokenStream,
+    return_ty: TokenStream,
+) -> TokenStream {
+    let self_ty = get_self_ty(is_mut, ident);
+    quote! {
+        luajit2_sys::luaL_Reg {
+            name: cstr!(#fn_str),
+            func: {
+                extern "C" fn step(ptr: *mut sys::lua_State) -> std::ffi::c_int {
+                    let state = State::from_raw(ptr);
+                    let len = <#args_ty as FromLua>::len() + 1;
+                    let idx = len * -1;
+
+                    let ud = state.cast_to::<#self_ty>(idx).unwrap();
+                    let args = state.cast_to::<#args_ty>(idx + 1).unwrap();
+                    let result = ud.#fn_ident(args);
+
+                    state.push(result);
+                    <#return_ty as ToLua>::len() as std::ffi::c_int
+                }
+                Some(step)
+            },
+        }
+    }
+}
+
+fn gen_method_no_arg_no_return(
+    is_mut: bool,
+    ud_ty: &Ident,
+    fn_ident: &Ident,
+    fn_str: Literal,
+) -> TokenStream {
+    let self_ty = get_self_ty(is_mut, ud_ty);
+    quote! {
+        luajit2_sys::luaL_Reg {
+            name: cstr!(#fn_str),
+            func: {
+                extern "C" fn step(ptr: *mut sys::lua_State) -> std::ffi::c_int {
+                    let state = State::from_raw(ptr);
+                    let ud = state.cast_to::<#self_ty>(-1).unwrap();
+                    ud.#fn_ident();
+                    0
+                }
+                Some(step)
+            },
+        }
+    }
 }
 
 pub fn gen_user_data_impl(ty: Impl) -> TokenStream {
@@ -188,16 +278,21 @@ pub fn gen_user_data_impl(ty: Impl) -> TokenStream {
 
             if let Some(info) = params_info(&func) {
                 match info {
-                    ParamsInfo::RawMethod => {
-                        decls.push(gen_raw_method(&ty_ident, fn_ident, fn_str))
+                    ParamsInfo::RawMethod(is_mut) => {
+                        decls.push(gen_raw_method(is_mut, &ty_ident, fn_ident, fn_str))
                     }
-                    ParamsInfo::RawMethodMut => {
-                        decls.push(gen_raw_mut_method(&ty_ident, fn_ident, fn_str))
+                    ParamsInfo::RawStatic => {
+                        decls.push(gen_raw_static(&ty_ident, fn_ident, fn_str))
                     }
-                    ParamsInfo::RawStatic => decls.push(gen_raw_static()),
-                    ParamsInfo::Static => decls.push(gen_static()),
-                    ParamsInfo::Method => decls.push(gen_method(&ty_ident, fn_ident, fn_str)),
-                    ParamsInfo::MethodMut => decls.push(gen_mut_method()),
+                    ParamsInfo::Static(args_ty, return_ty) => {
+                        decls.push(gen_static(&ty_ident, fn_ident, fn_str, args_ty, return_ty))
+                    }
+                    ParamsInfo::Method(is_mut, args_ty, return_ty) => decls.push(gen_method(
+                        is_mut, &ty_ident, fn_ident, fn_str, args_ty, return_ty,
+                    )),
+                    ParamsInfo::MethodNoArgNoReturn(is_mut) => decls.push(
+                        gen_method_no_arg_no_return(is_mut, &ty_ident, fn_ident, fn_str),
+                    ),
                 }
             }
 
