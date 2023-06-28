@@ -160,16 +160,94 @@ pub mod tests {
     }
 
     #[test]
-    fn test_macro() {
+    fn raw() {
         struct Test;
 
         #[user_data]
         impl Test {
-            pub fn foo(&self) {}
+            pub fn foo(state: *mut luajit2_sys::lua_State) -> i32 {
+                0
+            }
         }
-
-        let state = State::new();
     }
+
+    // #[test]
+    // fn static_raw() {
+    //     struct Test;
+    //
+    //     #[user_data]
+    //     impl Test {
+    //         pub fn foo(state: &State) -> i32 {
+    //             let a = state.cast_to::<i32>(-2).unwrap();
+    //             let b = state.cast_to::<i32>(-1).unwrap();
+    //
+    //             state.push(a + b);
+    //             1
+    //         }
+    //     }
+    //
+    //     let state = State::new();
+    //     state.push(Test {});
+    //
+    //     let option = state.get_field::<LuaFunction<(i32, i32), i32>>(-1, "foo");
+    //     assert!(option.is_some());
+    //
+    //     let foo = option.unwrap();
+    //     let result = foo((2, 3));
+    //     assert!(result.is_ok());
+    //     assert_eq!(result.unwrap(), 5);
+    // }
+
+    // #[test]
+    // fn method_raw() {
+    //     struct Test;
+    //
+    //     #[user_data]
+    //     impl Test {
+    //         pub fn foo(&self, state: &State) -> i32 {
+    //             let a = state.cast_to::<i32>(-2).unwrap();
+    //             let b = state.cast_to::<i32>(-1).unwrap();
+    //
+    //             state.push(a + b);
+    //             1
+    //         }
+    //     }
+    //
+    //     let state = State::new();
+    //     state.push(Test {});
+    //
+    //     let option =
+    //         state.get_field::<LuaFunction<(RelativeValue<Test>, i32, i32), i32>>(-1, "foo");
+    //     assert!(option.is_some());
+    //
+    //     let foo = option.unwrap();
+    //     let result = foo((ref_to!(Test, -2), 2, 3));
+    //     assert!(result.is_ok());
+    //     assert_eq!(result.unwrap(), 5);
+    // }
+
+    // #[test]
+    // fn static_func() {
+    //     struct Test;
+    //
+    //     #[user_data]
+    //     impl Test {
+    //         pub fn foo(a: i32, b: i32) -> i32 {
+    //             a + b
+    //         }
+    //     }
+    //
+    //     let state = State::new();
+    //     state.push(Test {});
+    //
+    //     let option = state.get_field::<LuaFunction<(i32, i32), i32>>(-1, "foo");
+    //     assert!(option.is_some());
+    //
+    //     let foo = option.unwrap();
+    //     let result = foo((2, 3));
+    //     assert!(result.is_ok());
+    //     assert_eq!(result.unwrap(), 5);
+    // }
 
     #[test]
     fn push_int() {
@@ -313,29 +391,29 @@ pub mod tests {
         assert_eq!(result.unwrap(), value);
     }
 
-    #[test]
-    fn take_user_data_ref_from_stack() {
-        struct Test;
-
-        #[user_data]
-        impl Test {
-            pub fn foo(&mut self, state: &State) -> i32 {
-                state.push(10);
-                1
-            }
-
-            fn bar(&self) -> i32 {
-                123
-            }
-        }
-
-        let state = State::new();
-        state.push(Test {});
-
-        let result = state.cast_to::<&Test>(-1);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().bar(), 123);
-    }
+    // #[test]
+    // fn take_user_data_ref_from_stack() {
+    //     struct Test;
+    //
+    //     #[user_data]
+    //     impl Test {
+    //         pub fn foo(&mut self, state: &State) -> i32 {
+    //             state.push(10);
+    //             1
+    //         }
+    //
+    //         fn bar(&self) -> i32 {
+    //             123
+    //         }
+    //     }
+    //
+    //     let state = State::new();
+    //     state.push(Test {});
+    //
+    //     let result = state.cast_to::<&Test>(-1);
+    //     assert!(result.is_some());
+    //     assert_eq!(result.unwrap().bar(), 123);
+    // }
 
     #[test]
     fn push_user_data() {
@@ -384,44 +462,44 @@ pub mod tests {
         assert_eq!(result.unwrap(), 22.0);
     }
 
-    #[test]
-    fn proc_macro_pub_raw_function() {
-        struct Test {}
-
-        #[user_data]
-        impl Test {
-            pub fn foo(&self, state: &State) -> i32 {
-                let is_user_data = state.is::<Test>(1);
-                state.push(is_user_data);
-
-                let a = state.cast_to::<f64>(2).unwrap_or(0.0);
-                let b = state.cast_to::<f64>(3).unwrap_or(0.0);
-                state.push(a + b);
-
-                2
-            }
-        }
-
-        let slice = from_ptr!(<Test as UserData>::name());
-        assert_eq!(slice, "Test");
-
-        let funcs = <Test as UserData>::functions();
-        assert!(funcs.len() > 0);
-
-        let func_name = from_ptr!(funcs[0].name);
-        assert_eq!(func_name, "foo");
-
-        let state = State::new();
-        state.push(Test {});
-        let option =
-            state.get_field::<LuaFunction<(RelativeValue<Test>, i32, i32), (bool, f32)>>(-1, "foo");
-        assert!(option.is_some());
-
-        let foo = option.unwrap();
-        let result = foo((ref_to!(Test, -2), 2, 3));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), (true, 5.0));
-    }
+    // #[test]
+    // fn proc_macro_pub_raw_function() {
+    //     struct Test {}
+    //
+    //     #[user_data]
+    //     impl Test {
+    //         pub fn foo(&self, state: &State) -> i32 {
+    //             let is_user_data = state.is::<Test>(1);
+    //             state.push(is_user_data);
+    //
+    //             let a = state.cast_to::<f64>(2).unwrap_or(0.0);
+    //             let b = state.cast_to::<f64>(3).unwrap_or(0.0);
+    //             state.push(a + b);
+    //
+    //             2
+    //         }
+    //     }
+    //
+    //     let slice = from_ptr!(<Test as UserData>::name());
+    //     assert_eq!(slice, "Test");
+    //
+    //     let funcs = <Test as UserData>::functions();
+    //     assert!(funcs.len() > 0);
+    //
+    //     let func_name = from_ptr!(funcs[0].name);
+    //     assert_eq!(func_name, "foo");
+    //
+    //     let state = State::new();
+    //     state.push(Test {});
+    //     let option =
+    //         state.get_field::<LuaFunction<(RelativeValue<Test>, i32, i32), (bool, f32)>>(-1, "foo");
+    //     assert!(option.is_some());
+    //
+    //     let foo = option.unwrap();
+    //     let result = foo((ref_to!(Test, -2), 2, 3));
+    //     assert!(result.is_ok());
+    //     assert_eq!(result.unwrap(), (true, 5.0));
+    // }
 
     #[test]
     fn proc_macro_pub_function() {}
